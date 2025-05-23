@@ -1,0 +1,30 @@
+DICOM Bulk Scan Summary Report
+Scanned Folder: C:/Users/anuse/Desktop/moleaiproject/dicom
+Total Files Found: 33126
+Successfully Scanned: 33126
+Failed to Read: 0
+
+Bits Allocated:
+  8: 33126 files (100.00%)
+
+Bits Stored:
+  8: 33126 files (100.00%)
+
+Photometric Interpretations:
+  YBR_FULL_422: 33126 files (100.00%)
+
+Pixel Representation (0=unsigned, 1=signed):
+  0: 33126 files (100.00%)
+
+Modalities:
+  XC: 33126 files (100.00%)
+
+Pixel Data Types (numpy dtype or bits):
+  uint8: 33126 files (100.00%)
+
+RescaleSlope: None found
+RescaleIntercept: None found
+Rows (image height): min=480, max=6000, average=2678.76
+Columns (image width): min=640, max=6000, average=4039.63
+Pixel Value Min (across all images): 0
+Pixel Value Max (across all images): 255

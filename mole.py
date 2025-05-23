@@ -1,0 +1,103 @@
+import torch
+import torch.nn as nn
+import torchvision.models as models
+from torch.utils.data import Dataset, DataLoader
+import cv2
+import numpy as np
+import os
+from pathlib import Path
+from tqdm import tqdm
+from torchvision import transforms
+import torch.nn.functional as F
+from PIL import Image
+
+# SimCLR Augmentation for SSL
+ssl_transform = transforms.Compose([
+    transforms.RandomResizedCrop(224, scale=(0.2, 1.0)),
+    transforms.RandomHorizontalFlip(),
+    transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+    transforms.RandomGrayscale(p=0.2),
+    transforms.ToTensor(),
+    transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # ImageNet stats
+])
+
+# Dataset for SSL (no labels)
+class MoleSSLDataset(Dataset):
+    def __init__(self, image_paths, transform=None):
+        self.image_paths = image_paths
+        self.transform = transform
+
+    def __len__(self):
+        return len(self.image_paths)
+
+    def __getitem__(self, idx):
+        # Load image as PIL for torchvision transforms
+        img = cv2.imread(str(self.image_paths[idx]))
+        if img is None:
+            raise ValueError(f"Failed to load image: {self.image_paths[idx]}")
+        img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
+        img = Image.fromarray(img)  # Convert to PIL Image
+        if self.transform:
+            img1 = self.transform(img)  # Apply augmentations
+            img2 = self.transform(img)  # Second augmented view
+            return img1, img2
+        return torch.tensor(np.array(img).transpose(2, 0, 1), dtype=torch.float32) / 255.0, img
+
+# SimCLR Loss
+def simclr_loss(features1, features2, temperature=0.5):
+    batch_size = features1.size(0)
+    labels = torch.arange(batch_size).cuda()
+    features = torch.cat([features1, features2], dim=0)
+    similarity_matrix = F.cosine_similarity(features.unsqueeze(1), features.unsqueeze(0), dim=2)
+    similarity_matrix = similarity_matrix / temperature
+    mask = torch.eye(2 * batch_size, dtype=torch.bool).cuda()
+    similarity_matrix = similarity_matrix[~mask].view(2 * batch_size, -1)
+    labels = torch.cat([labels, labels], dim=0)
+    loss = nn.CrossEntropyLoss()(similarity_matrix, labels)
+    return loss
+
+# Load Data
+data_dir = r"C:\Users\anuse\Desktop\moleaiproject\Unlabelled"
+if not os.path.exists(data_dir):
+    raise FileNotFoundError(f"Directory not found: {data_dir}")
+
+image_paths = [Path(data_dir) / f for f in os.listdir(data_dir) if f.endswith(".png")]
+print(f"Total images: {len(image_paths)}")
+assert len(image_paths) == 1156, f"Expected 1156 images, got {len(image_paths)}"
+
+# SSL Pretraining
+ssl_dataset = MoleSSLDataset(image_paths, transform=ssl_transform)
+ssl_loader = DataLoader(ssl_dataset, batch_size=16, shuffle=True)
+
+model = models.efficientnet_b0(weights="IMAGENET1K_V1")  # Updated for torchvision 0.13+
+model.classifier = nn.Sequential(
+    nn.Linear(model.classifier[1].in_features, 128),
+    nn.ReLU(),
+    nn.Linear(128, 128)  # Projection head for SimCLR
+)
+model = model.cuda()
+
+optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
+for epoch in range(20):
+    model.train()
+    ssl_loss = 0
+    for img1, img2 in tqdm(ssl_loader, desc=f"SSL Epoch {epoch+1}"):
+        img1, img2 = img1.cuda(), img2.cuda()
+        optimizer.zero_grad()
+        features1 = model(img1)
+        features2 = model(img2)
+        loss = simclr_loss(features1, features2)
+        loss.backward()
+        optimizer.step()
+        ssl_loss += loss.item()
+    print(f"SSL Epoch {epoch+1}: Loss = {ssl_loss/len(ssl_loader):.4f}")
+
+torch.save(model.state_dict(), "ssl_model.pth")
+print("SSL pretraining complete. Model saved as 'ssl_model.pth'.")
+
+# Placeholder for Supervised Fine-Tuning
+print("To proceed with fine-tuning, provide a CSV file with columns 'filename' and 'label' (0=benign, 1=malignant).")
+# Example CSV format:
+# filename,label
+# image1.png,0
+# image2.png,1

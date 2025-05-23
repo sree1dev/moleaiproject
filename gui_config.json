@@ -1,0 +1,6 @@
+{
+    "duplicates_file": "C:/Users/anuse/Desktop/moleaiproject/ISIC_2020_Training_Duplicates.csv",
+    "groundtruth_file": "C:/Users/anuse/Desktop/moleaiproject/ISIC_2020_Training_GroundTruth_v2.csv",
+    "benign_folder": "C:/Users/anuse/Desktop/moleaiproject/benign",
+    "malignant_folder": "C:/Users/anuse/Desktop/moleaiproject/malign"
+}
