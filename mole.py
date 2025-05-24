@@ -11,12 +11,14 @@ from torchvision import transforms
 import torch.nn.functional as F
 from PIL import Image
 
-# SimCLR Augmentation for SSL
+# Enhanced SimCLR Augmentation for SSL
 ssl_transform = transforms.Compose([
     transforms.RandomResizedCrop(224, scale=(0.2, 1.0)),
     transforms.RandomHorizontalFlip(),
-    transforms.ColorJitter(brightness=0.4, contrast=0.4, saturation=0.4, hue=0.1),
+    transforms.RandomRotation(15),  # Subtle rotation
+    transforms.ColorJitter(brightness=0.5, contrast=0.5, saturation=0.4, hue=0.1),  # Stronger jitter
     transforms.RandomGrayscale(p=0.2),
+    transforms.GaussianBlur(kernel_size=3, sigma=(0.1, 0.5)),  # Light blur
     transforms.ToTensor(),
     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])  # ImageNet stats
 ])
@@ -31,15 +33,14 @@ class MoleSSLDataset(Dataset):
         return len(self.image_paths)
 
     def __getitem__(self, idx):
-        # Load image as PIL for torchvision transforms
         img = cv2.imread(str(self.image_paths[idx]))
         if img is None:
             raise ValueError(f"Failed to load image: {self.image_paths[idx]}")
         img = cv2.cvtColor(img, cv2.COLOR_BGR2RGB)
         img = Image.fromarray(img)  # Convert to PIL Image
         if self.transform:
-            img1 = self.transform(img)  # Apply augmentations
-            img2 = self.transform(img)  # Second augmented view
+            img1 = self.transform(img)
+            img2 = self.transform(img)
             return img1, img2
         return torch.tensor(np.array(img).transpose(2, 0, 1), dtype=torch.float32) / 255.0, img
 
@@ -69,7 +70,7 @@ assert len(image_paths) == 1156, f"Expected 1156 images, got {len(image_paths)}"
 ssl_dataset = MoleSSLDataset(image_paths, transform=ssl_transform)
 ssl_loader = DataLoader(ssl_dataset, batch_size=16, shuffle=True)
 
-model = models.efficientnet_b0(weights="IMAGENET1K_V1")  # Updated for torchvision 0.13+
+model = models.efficientnet_b0(weights="IMAGENET1K_V1")
 model.classifier = nn.Sequential(
     nn.Linear(model.classifier[1].in_features, 128),
     nn.ReLU(),
@@ -77,8 +78,10 @@ model.classifier = nn.Sequential(
 )
 model = model.cuda()
 
-optimizer = torch.optim.Adam(model.parameters(), lr=1e-3)
-for epoch in range(20):
+optimizer = torch.optim.Adam(model.parameters(), lr=3e-4)  # Lower learning rate
+scheduler = torch.optim.lr_scheduler.ReduceLROnPlateau(optimizer, patience=3, factor=0.5)
+
+for epoch in range(30):  # Increased to 30 epochs
     model.train()
     ssl_loss = 0
     for img1, img2 in tqdm(ssl_loader, desc=f"SSL Epoch {epoch+1}"):
@@ -90,14 +93,14 @@ for epoch in range(20):
         loss.backward()
         optimizer.step()
         ssl_loss += loss.item()
-    print(f"SSL Epoch {epoch+1}: Loss = {ssl_loss/len(ssl_loader):.4f}")
+    avg_loss = ssl_loss / len(ssl_loader)
+    print(f"SSL Epoch {epoch+1}: Loss = {avg_loss:.4f}, LR = {optimizer.param_groups[0]['lr']:.6f}")
+    scheduler.step(avg_loss)
+    if scheduler.get_last_lr()[0] < optimizer.param_groups[0]['lr']:
+        print(f"Learning rate reduced to {scheduler.get_last_lr()[0]:.6f}")
 
 torch.save(model.state_dict(), "ssl_model.pth")
 print("SSL pretraining complete. Model saved as 'ssl_model.pth'.")
 
 # Placeholder for Supervised Fine-Tuning
 print("To proceed with fine-tuning, provide a CSV file with columns 'filename' and 'label' (0=benign, 1=malignant).")
-# Example CSV format:
-# filename,label
-# image1.png,0
-# image2.png,1
